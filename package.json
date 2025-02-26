@@ -1,0 +1,16 @@
+{
+  "name": "writing-excuse",
+  "version": "1.0.0",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node src/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "express": "^4.21.2",
+    "nocache": "^4.0.0"
+  }
+}
