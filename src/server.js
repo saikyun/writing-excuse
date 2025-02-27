@@ -1,6 +1,8 @@
 delete require.cache[
   "/Users/saikyun/Skapande/js/writing-excuse/src/npc/views.js"
 ]
+delete require.cache["/Users/saikyun/Skapande/js/writing-excuse/src/fun.js"]
+delete require.cache["/Users/saikyun/Skapande/js/writing-excuse/src/vector.js"]
 delete require.cache[
   "/Users/saikyun/Skapande/js/writing-excuse/src/dungeon/views.js"
 ]
@@ -22,6 +24,8 @@ const npc_views = require("./npc/views.js")
 const dungeon_views = require("./dungeon/views.js")
 const hexcrawl = require("./hexcrawl/hexcrawl.js")
 
+const { some } = require("./fun.js")
+
 const db = new DatabaseSync(":memory")
 
 if (globalThis.server) {
@@ -30,14 +34,6 @@ if (globalThis.server) {
 
 const app = express()
 const port = 3000
-
-const some = (l) => l != null && l.length > 0
-const last = (l) => (some(l) ? l[l.length - 1] : null)
-
-const log = (...args) => {
-  console.log(...args)
-  return last(args)
-}
 
 const exists = (table) =>
   some(
