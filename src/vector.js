@@ -1,3 +1,5 @@
+const eq = (p1, p2) => p1.x == p2.x && p2.y == p2.y
+
 const mag = (p) => {
   return Math.sqrt(p.x * p.x + p.y * p.y)
 }
@@ -67,4 +69,5 @@ module.exports = {
   vrot,
   normalize,
   dist,
+  eq,
 }
