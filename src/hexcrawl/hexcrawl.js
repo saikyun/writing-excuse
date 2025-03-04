@@ -3,12 +3,83 @@ const container = require("../container.js")
 const { log, last } = require("./../fun.js")
 const v = require("./../vector.js")
 
+const dice = (d) => 1 + Math.floor(Math.random() * d)
+
+var max_stamina = 100
 var stamina = 100
 
 const character = ({ problem } = {}) => /*html*/ `
   ${problem ? `<p class="text-danger">${problem}</p>` : ""}
-  Stamina: ${stamina}
+  <p>Stamina: ${stamina}</p>
+  <button hx-target="#popup" hx-swap="outerHTML" hx-get="hexcrawl/rest">Rest</button>
 `
+
+const empty_popup = () => /*html*/ `
+<div id="popup">
+  <div id="popup-inner">
+  </div>
+</div>
+`
+
+router.get("/empty-popup", (req, res) =>
+  res
+    .header("HX-Retarget", "#popup")
+    .header("HX-Reswap", "outerHTML")
+    .send(empty_popup())
+)
+
+const wrap_popup = (inner) => /*html*/ `
+<div id="popup" class="show">
+<div id="popup-inner">
+${inner}
+<button hx-get="hexcrawl/empty-popup">Close</button>
+</div>
+</div>
+`
+
+const rest = () =>
+  wrap_popup(/*html*/ `
+<div>
+  <button disabled>Rent a room</button>
+  <span class="text-danger">No known city or village nearby.</span>
+</div>
+<div>
+  <button disabled>Sleep in a barn</button>
+  <span class="text-danger">No farm nearby.</span>
+</div>
+<div>
+  <button disabled>Raise your tent</button>
+  <span class="text-danger">You don't have a tent.</span>
+</div>
+<div>
+  <button hx-target="#popup" hx-get="hexcrawl/lay-down">Lay down on the cold, hard ground</button>
+</div>
+`)
+
+const lay_down = () => {
+  var recovery = 20 + dice(15)
+  stamina += recovery
+  stamina = Math.min(stamina, max_stamina)
+
+  return `${wrap_popup(/*html*/ `
+    <p>You lay down.</p>
+    <p>It's cold.</p>
+    <p>It's hard.</p>
+    <p>You fall into a restless sleep.</p>
+
+    <p class="text-warning">You recover ${recovery} stamina.</p>
+`)}
+  <div hx-swap-oob="true" id="character">${character()}</div>
+`
+}
+
+router.get("/rest", (req, res) => {
+  res.send(rest())
+})
+
+router.get("/lay-down", (req, res) => {
+  res.send(lay_down())
+})
 
 const size = 50
 
@@ -133,8 +204,6 @@ const vegetation = (current_vegetation, i) =>
       : err(`${i} should be between 1 and 12`)
     : err(`${current_vegetation} is not a valid vegetation`)
 
-const dice = (d) => 1 + Math.floor(Math.random() * d)
-
 const L = [-1, 0]
 const UL = [0, -1]
 const UR = [1, -1]
@@ -206,9 +275,11 @@ router.get("/explore/:i", (req, res) => {
   const new_ones = explore(curhex().terrain, curhex().vegetation, i)
 
   if (new_ones == false) {
-    res
-      .header("HX-Retarget", "#character")
-      .send(character({ problem: "Not enough stamina." }))
+    res.header("HX-Retarget", "#character").send(
+      `<div id="character">${character({
+        problem: "Not enough stamina.",
+      })}</div>`
+    )
     return
   }
 
@@ -293,6 +364,27 @@ router.get("/", (req, res) => {
         --vegetation-bg: url("sprites/barren.png");
       }
 
+      #popup {
+        display: none;
+        position: absolute;
+        top: 50px;
+        left: 0;
+        width: 100%;
+        height: 400px;
+      }
+
+      #popup.show {
+        display: block;
+      }
+
+      #popup-inner {
+        height: 100%;
+        margin: 30px;
+        padding: 30px;
+        border-radius: 20px;
+        background: rgba(20, 20, 20, 0.8);
+      }
+
       .tile {
         background-image: var(--terrain-bg), var(--vegetation-bg);
         background-size: 100%;
@@ -346,6 +438,8 @@ router.get("/", (req, res) => {
     <div id="character">
       ${character()}
     </div>
+
+    ${empty_popup()}
 
 
     <script>
