@@ -1,16 +1,27 @@
 const router = require("express").Router()
 const container = require("../container.js")
-const { log, last } = require("./../fun.js")
+const { none, log, last } = require("./../fun.js")
 const v = require("./../vector.js")
 
 const dice = (d) => 1 + Math.floor(Math.random() * d)
 
+var monster_id = 0
+
+var max_hp = 16
+
+const player = { max_hp: max_hp, hp: max_hp }
+
 var max_stamina = 100
-var stamina = 100
+var stamina = max_stamina
+var exhaustion = null
+var illness = null
 
 const character = ({ problem } = {}) => /*html*/ `
   ${problem ? `<p class="text-danger">${problem}</p>` : ""}
+  <p>Health: ${player.hp}</p>
   <p>Stamina: ${stamina}</p>
+  ${exhaustion ? `<p class="text-warning">Exhaustion: ${exhaustion}</p>` : ""}
+  ${illness ? `<p class="text-danger">Illness: ${illness}</p>` : ""}
   <button hx-target="#popup" hx-swap="outerHTML" hx-get="hexcrawl/rest">Rest</button>
 `
 
@@ -52,14 +63,54 @@ const rest = () =>
   <span class="text-danger">You don't have a tent.</span>
 </div>
 <div>
-  <button hx-target="#popup" hx-get="hexcrawl/lay-down">Lay down on the cold, hard ground</button>
+  <button hx-target="#popup" hx-swap="outerHTML" hx-get="hexcrawl/lay-down">Lay down on the cold, hard ground</button>
 </div>
 `)
 
+const illnesses = ["a cold", "fever", "diarrhea", "death"]
+
+const illness_table = (current_illness, i) =>
+  current_illness == null
+    ? i <= 6
+      ? "a cold"
+      : i <= 10
+      ? "fever"
+      : i <= 12
+      ? "diarrhea"
+      : err(`${i} should be between 1 and 12`)
+    : current_illness == "a cold"
+    ? i <= 6
+      ? "fever"
+      : i <= 11
+      ? "diarrhea"
+      : i <= 12
+      ? "death"
+      : err(`${i} should be between 1 and 12`)
+    : current_illness == "fever"
+    ? i <= 8
+      ? "diarrhea"
+      : i <= 12
+      ? "death"
+      : err(`${i} should be between 1 and 12`)
+    : current_illness == "diarrhea"
+    ? "death"
+    : err(`${current_illness} is not a valid illness`)
+
 const lay_down = () => {
-  var recovery = 20 + dice(15)
+  var recovery = 70 + dice(30)
   stamina += recovery
   stamina = Math.min(stamina, max_stamina)
+
+  var ex = 30 + dice(40)
+  exhaustion += ex
+
+  var new_illness
+
+  if (exhaustion >= 100) {
+    new_illness = illness_table(illness, dice(12))
+    illness = new_illness
+    exhaustion = 0
+  }
 
   return `${wrap_popup(/*html*/ `
     <p>You lay down.</p>
@@ -67,7 +118,14 @@ const lay_down = () => {
     <p>It's hard.</p>
     <p>You fall into a restless sleep.</p>
 
-    <p class="text-warning">You recover ${recovery} stamina.</p>
+    <p class="text-secondary">You recover ${recovery} stamina.</p>
+    ${
+      new_illness
+        ? `<p class="text-danger">You got ${new_illness}.</p>`
+        : exhaustion <= 50
+        ? `<p>You're starting to feel exhausted.</p>`
+        : `<p class="text-warning">You're not feeling too good...</p>`
+    }
 `)}
   <div hx-swap-oob="true" id="character">${character()}</div>
 `
@@ -89,22 +147,38 @@ const hex_to_pixel = ([q, r]) => {
   return [x, y]
 }
 
-let hexi = 3
+let hexi = 0
 
-const grid = [
-  { pos: [0, 1] },
-  { pos: [2, 0] },
-  { pos: [1, 0] },
-  { pos: [1, 1] },
-  { pos: [2, 1] },
-  { pos: [0, 2] },
-  { pos: [1, 2] },
-]
+const grid = []
+
+const addhex = (pos) => {
+  log("addhex")
+  grid.push({ pos: pos, i: grid.length, npcs: [] })
+  return last(grid)
+}
+
+addhex([1, 1])
+
+const npcs = () => {
+  if (none(curhex().npcs)) return ""
+
+  return curhex().npcs.map((npc) => npc.render(npc))
+}
 
 grid.map((h, i) => (h.i = i))
 
 const pos_to_i = (p) =>
   grid.findIndex(({ pos }) => p[0] == pos[0] && p[1] == pos[1])
+
+const find_npc = (npc_id) => {
+  for (const tile in grid) {
+    const { npcs } = grid[tile]
+    const res = npcs.find(({ id }) => id === npc_id)
+    if (res) {
+      return res
+    }
+  }
+}
 
 const pos_to_hex = (p) => grid[pos_to_i(p)]
 
@@ -214,31 +288,98 @@ const dirs = [R, UR, UL, L, BL, BR]
 
 const neighbours = (i) => dirs.map((d) => v.vadd([...grid[i].pos], d))
 
-const addhex = (pos) => {
-  grid.push({ pos: pos, i: grid.length })
-  return last(grid)
-}
-
 const exploration_cost = () => 20
 
-const explore = (from_terrain, from_vegetation, i) => {
+const render_biter = (biter) => {
+  return /*html*/ `
+    <div>
+      ${
+        biter.hp > 0
+          ? /*html*/ `
+        <p>A Biter is here.</p>
+        <button hx-target="#popup" hx-swap="outerHTML" hx-get="hexcrawl/fight/${biter.id}">Fight</button>
+      `
+          : "The corpse of a Biter lies on the ground."
+      }
+    </div>
+  `
+}
+
+const biter_attack = (biter, opponent) => {
+  var dmg = dice(4)
+  opponent.hp -= dmg
+  return /*html*/ `
+  <div>
+    ${
+      dmg == 0
+        ? "The Biter seems to sense you, hesitantly."
+        : `The Biter bites you! You lose ${dmg} health.`
+    }
+  </div>
+  `
+}
+
+const is_alive = (npc) => npc.hp > 0
+
+const add_terrain = (from_terrain, from_vegetation, i) => {
+  grid[i].terrain = terrain(from_terrain, dice(12))
+  grid[i].vegetation = vegetation(from_vegetation, dice(12))
+
+  if (dice(6) == 1) {
+    grid[i].npcs.push({
+      id: monster_id++,
+      hp: 4,
+      name: "biter",
+      attack: biter_attack,
+      render: render_biter,
+      visible: is_alive,
+    })
+  }
+}
+
+const explore_neighbours = (i, depth = 1) => {
+  return neighbours(i)
+    .flatMap((p) => {
+      var tile_i = pos_to_i(p)
+      var tile = grid[tile_i]
+      if (tile_i == -1) {
+        const new_tile = addhex(p)
+        add_terrain(grid[i].terrain, grid[i].vegetation, new_tile.i)
+        tile = new_tile
+      }
+
+      if (grid[i].terrain == "mountains" && depth == 1) {
+        return [tile, ...explore_neighbours(tile.i, depth - 1)]
+      }
+      return tile
+    })
+    .filter((o) => o)
+}
+
+const explore = (i) => {
+  console.log("explore")
   if (exploration_cost() > stamina) {
     return false
   }
 
   stamina -= exploration_cost()
 
-  grid[i].terrain = terrain(from_terrain, dice(12))
-  grid[i].vegetation = vegetation(from_vegetation, dice(12))
   grid[i].explored = true
 
-  return neighbours(i)
-    .map((p) => (pos_to_i(p) == -1 ? addhex(p) : null))
-    .filter((o) => o)
+  return explore_neighbours(i)
 }
 
 const tile = (h, { oob } = {}) => {
   const [x, y] = hex_to_pixel(h.pos)
+
+  const inside = [
+    ...h.npcs
+      .filter((npc) => npc.visible(npc))
+      .map((npc) => `<div class="${npc.name}"></div>`),
+  ]
+
+  h === curhex() ? inside.push(`<div class="current"></div>`) : null
+
   return /*html*/ `
   <div
     id="tile-${h.i}"
@@ -252,27 +393,66 @@ const tile = (h, { oob } = {}) => {
       left: ${Math.floor(x)}px;
       top: ${Math.floor(y)}px;">
     <div class="tile">
-      <div class="inside-tile ${log(h === curhex()) ? "current" : ""}">
+      <div class="inside-tile x${inside.length}">
+        ${inside.join("\n")}
       </div>
     </div>
   </div>
   `
 }
 
-const map = () => {
-  if (!curhex().explored) {
-    explore(terrains[dice(4) - 1], vegetations[dice(4) - 1], hexi)
-  }
+if (!curhex().explored) {
+  add_terrain(terrains[dice(4) - 1], vegetations[dice(4) - 1], hexi)
+  explore(hexi)
+}
 
+const map = () => {
   return grid.map(tile).join("")
 }
+
+router.get("/fight/:id", (req, res) => {
+  var npc_id = parseInt(req.params.id)
+  var dmg = 1 + dice(6)
+  var npc = find_npc(npc_id)
+
+  if (!npc) err(`Npc with ID ${npc_id} not found.`)
+
+  npc.hp -= dmg
+
+  const npc_attack = npc.attack(npc, player)
+
+  var died = false
+  if (npc.hp <= 0) {
+    died = true
+  }
+
+  log(npc)
+
+  res.send(/*html*/ `
+    ${wrap_popup(/*html*/ `
+      ${npc_attack}
+      <div>
+        You punch it. You deal ${dmg} to the ${npc.name}.
+      </div>
+      ${died ? `<div>The ${npc.name} falls to the ground. Lifeless.</div>` : ""}
+    `)}
+
+    ${tile(curhex(), { oob: true })}
+    <div hx-swap-oob="true" id="character">
+      ${character()}
+    </div>
+    <div hx-swap-oob="true" id="npcs">
+      ${npcs()}
+    </div>
+    `)
+})
 
 router.get("/explore/:i", (req, res) => {
   const i = parseInt(req.params.i)
 
   const last_hex_i = hexi
 
-  const new_ones = explore(curhex().terrain, curhex().vegetation, i)
+  const new_ones = explore(i)
 
   if (new_ones == false) {
     res.header("HX-Retarget", "#character").send(
@@ -291,9 +471,12 @@ router.get("/explore/:i", (req, res) => {
     ${new_ones
       .map((h) => `<div hx-swap-oob="beforeend:#map">${tile(h)}</div>`)
       .join("")}
-    <div hx-swap-oob="true" id="character">
-      ${character()}
-    </div>
+      <div hx-swap-oob="true" id="character">
+        ${character()}
+      </div>
+      <div hx-swap-oob="true" id="npcs">
+        ${npcs()}
+      </div>
     `
   )
 })
@@ -321,7 +504,7 @@ router.get("/", (req, res) => {
       }
 
       .unexplored, .unexplored > div {
-        background: rgba(0,0,0,0.1);
+        /*background: rgba(0,0,0,0.1);*/
       }
 
       .terrain-swamp > div {
@@ -401,11 +584,35 @@ router.get("/", (req, res) => {
         justify-content: center;
       }
 
-      .inside-tile.current {
-        width: 40px;
-        height: 60px;
+      .inside-tile {
+        width: 100%;
+        height: 100%;
+        padding: 13px;
+        display: grid;
+      }
+
+      .x1 {
+        padding: 25px;
+        grid-template-columns: 1fr;
+      }
+
+      .x2 {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .x3, .x4 {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: 1fr 1fr;
+      }
+
+      .current {
         background: url("sprites/meeple.png") no-repeat;
-        background-size: 100%;
+        background-size: contain;
+      }
+
+      .biter {
+        background: url("sprites/biter.png") no-repeat;
+        background-size: contain;
       }
 
       .hex-inner {
@@ -435,8 +642,17 @@ router.get("/", (req, res) => {
         </div>
       </div>
     </div>
-    <div id="character">
-      ${character()}
+    <div class="row">
+      <div class="col-6">
+        <div id="character">
+          ${character()}
+        </div>
+      </div>
+      <div class="col-6">
+        <div id="npcs">
+          ${npcs()}
+        </div>
+      </div>
     </div>
 
     ${empty_popup()}
@@ -459,7 +675,6 @@ parent.addEventListener("mouseleave", (e) => mouseLeave(e));
 parent.addEventListener("mousemove", (e) => mouseMove(e));
 
 function mouseIsDown(e) {
-  console.log("huh")
 isDown = true;
 startY = e.pageY - parent.offsetTop;
 startX = e.pageX - parent.offsetLeft;

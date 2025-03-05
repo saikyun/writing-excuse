@@ -54,8 +54,6 @@ if (!exists("npc")) {
 
 //db.prepare("INSERT INTO npc (name) VALUES (?)").run()
 
-console.log(db.prepare("SELECT * FROM npc").all())
-
 app.use(express.json())
 
 app.use(nocache())
@@ -65,12 +63,11 @@ app.get("/first-dungeon", (req, res) => {
 })
 
 app.get("/first-dungeon/:area", (req, res) => {
-  console.log(req.params.area)
   res.send(dungeon_views[req.params.area]())
 })
 
 const all_npcs = (opts) =>
-  npc_views.all(db.prepare("SELECT * FROM npc").all(), log(opts))
+  npc_views.all(db.prepare("SELECT * FROM npc").all(), opts)
 
 app.get("/npcs", (req, res) => {
   res.send(all_npcs())
@@ -85,7 +82,6 @@ app.get("/npcs/edit/:id", (req, res) => {
 })
 
 app.post("/npcs", (req, res) => {
-  console.log(req.body)
   try {
     db.prepare("INSERT INTO npc (name, description) VALUES(?,?)").run(
       req.body.name,
@@ -103,7 +99,6 @@ app.post("/npcs", (req, res) => {
 })
 
 app.put("/npcs", (req, res) => {
-  console.log(req.body)
   db.prepare("UPDATE npc SET description=? WHERE id=?").run(
     req.body.description,
     req.body.id
